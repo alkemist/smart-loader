@@ -1,22 +1,13 @@
-import { ChangeDetectorRef, Component, inject, Injector, runInInjectionContext } from '@angular/core';
+import { ChangeDetectorRef, Component, Injector, runInInjectionContext } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { SmartLoader } from '../src/smart-loader.js';
 
 @Component({
   standalone: true,
   template: ''
 })
 export class NoopComponent {
-  smartLoader: SmartLoader;
-  injector = inject(Injector);
-
-  constructor(
-    changeDetectorRef: ChangeDetectorRef
-  ) {
-    this.smartLoader = new SmartLoader(changeDetectorRef, this.injector)
-    //this.smartLoader = new SmartLoader(changeDetectorRef, this.injector)
+  constructor() {
   }
-
 }
 
 export interface SignalTesting {

@@ -1,74 +1,27 @@
-import {
-  ChangeDetectorRef,
-  computed,
-  effect,
-  Injector,
-  runInInjectionContext,
-  Signal,
-  signal,
-  WritableSignal
-} from "@angular/core";
+import { computed, effect, Injector, runInInjectionContext, signal, Signal, WritableSignal } from "@angular/core";
+import { Loader } from './loader.js'
 
-class LoaderModel {
-  constructor(protected _id: number, protected timing: number = 0, private changeDetectorRef?: ChangeDetectorRef) {
-  }
-
-  private _terminated = signal(false);
-
-  get terminated(): Signal<boolean> {
-    return this._terminated.asReadonly();
-  }
-
-  get id() {
-    return this._id;
-  }
-
-  delay() {
-    if (this.timing > 0) {
-      console.log(`[Timer ${ this._id }]`, 'start')
-      setTimeout(() => {
-        this.finish();
-        console.log(`[Timer ${ this._id }]`, 'finish')
-
-        if (this.changeDetectorRef) {
-          this.changeDetectorRef.detectChanges();
-        }
-      }, this.timing);
-    }
-  }
-
-  finish() {
-    this._terminated.set(true);
-  }
-}
 
 export class SmartLoader {
   private readonly _loading: Signal<boolean>;
   private readonly _count: Signal<number>;
-  private readonly _loaders: WritableSignal<LoaderModel[]>;
+  private readonly _loaders: WritableSignal<Loader[]>;
+  private polling: boolean = false;
 
-  constructor(private changeDetectorRef?: ChangeDetectorRef, injector?: Injector) {
-    this._loaders = signal<LoaderModel[]>([]);
+  constructor() {
+    this._loaders = signal<Loader[]>([]);
 
     this._count = computed(() => {
-      console.log('[Count]', this._loaders().filter(loader => !loader.terminated()).length);
+      //console.log('[Count]', this._loaders().filter(loader => !loader.terminated()).length);
 
       return this._loaders().filter(loader => !loader.terminated()).length
     });
 
     this._loading = computed(() => {
-      console.log('[Loading]', this._count() > 0);
+      //console.log('[Loading]', this._count() > 0);
 
       return this._count() > 0
     });
-
-    if (injector) {
-      runInInjectionContext(injector, () => {
-        effect(() => {
-          console.log('[Effect] Loading', this._loading())
-        })
-      })
-    }
   }
 
   get loading(): Signal<boolean> {
@@ -83,22 +36,41 @@ export class SmartLoader {
     return this._loaders().length;
   }
 
-  addLoader(timing: number = 0): LoaderModel {
+  addLoader(timing: number = 0): Loader {
     if (!this._loading()) {
       this._loaders.set([]);
     }
 
-    const loader = new LoaderModel(this._loaders().length + 1, timing, this.changeDetectorRef);
-    this._loaders.mutate(loaders => loaders.push(loader));
+    const loader = new Loader(this._loaders().length + 1, timing);
+    //this._loaders.mutate(loaders => loaders.push(loader));
+    this._loaders.update(loaders => ([ ...loaders, loader ]));
 
     if (timing > 0) {
       loader.delay();
     }
 
-    if (this.changeDetectorRef) {
-      this.changeDetectorRef.detectChanges();
-    }
-
     return loader;
+  }
+
+  startPolling(injector: Injector, timing: number) {
+    this.polling = true;
+
+    runInInjectionContext(injector, () => {
+      effect(() => {
+        //console.log('[Polling] ???', !this.loading(), this.polling);
+        if (!this.loading() && this.polling) {
+          console.log('[Polling] Next');
+          this.addLoader(timing);
+        }
+      }, { allowSignalWrites: true, injector })
+    });
+
+    this.addLoader(timing);
+  }
+
+  clean() {
+    this.polling = false;
+    this._loaders().map(loader => loader.finish());
+    //console.log('[Polling] End', this._loading())
   }
 }

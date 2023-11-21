@@ -1,7 +1,7 @@
-import { describe, expect, it } from '@jest/globals';
+import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import { SmartLoader } from '../src/smart-loader.js';
-import { NoopComponent, setUpSignalTesting, SignalTesting } from './setup-effect.js';
-import { ChangeDetectorRef, effect, Injector } from '@angular/core';
+import { setUpSignalTesting, SignalTesting } from './setup-effect.js';
+import { Poller } from '../src/poller';
 
 interface TickTest {
   tickCount: number,
@@ -19,7 +19,6 @@ interface SmartLoaderTest {
   name: string,
   loaders: LoaderTest[],
   ticks: TickTest[],
-  changes: number
 }
 
 describe("SmartLoader", () => {
@@ -37,7 +36,6 @@ describe("SmartLoader", () => {
         { tickCount: 1, loadingExpected: true, loadersLength: 1, loadersCount: 1 },   // 1 : 1
         { tickCount: 1, loadingExpected: false, loadersLength: 1, loadersCount: 0 }   // 2 : 0
       ],
-      changes: 2,
     },
     {
       name: 'multiple async time',
@@ -51,7 +49,6 @@ describe("SmartLoader", () => {
         { tickCount: 1, loadingExpected: true, loadersLength: 2, loadersCount: 1 },   // 2 : 0,1
         { tickCount: 1, loadingExpected: false, loadersLength: 2, loadersCount: 0 }   // 3 : 0,0
       ],
-      changes: 2,
     },
     {
       name: 'multiple sync time',
@@ -72,7 +69,6 @@ describe("SmartLoader", () => {
         { tickCount: 1, loadingExpected: true, loadersLength: 1, loadersCount: 1 },   // 7 : 1
         { tickCount: 1, loadingExpected: false, loadersLength: 1, loadersCount: 0 }   // 8 : 0
       ],
-      changes: 4,
     }
   ]
 
@@ -84,19 +80,8 @@ describe("SmartLoader", () => {
   it.each(testValues)(
     "$name",
     (test) => {
-      signalTesting.runInTestingInjectionContext((component: NoopComponent, injector: Injector, changeDetectorRef: ChangeDetectorRef) => {
-        //const smartLoader = new SmartLoader(changeDetectorRef, injector);
-        const smartLoader = component.smartLoader;
-
-        effect(
-          () => {
-            console.log("effect loading", test.name, smartLoader.loading())
-
-            expect(smartLoader.loading()).toBeDefined();
-          },
-          //{ injector: component.injector }
-          //{ injector }
-        );
+      signalTesting.runInTestingInjectionContext(() => {
+        const smartLoader = new SmartLoader();
 
         test.loaders.forEach((loader) => {
           setTimeout(() => {
@@ -108,13 +93,116 @@ describe("SmartLoader", () => {
           jest.advanceTimersByTime(tick.tickCount * tickDuration);
           expect(smartLoader.loading()).toBe(tick.loadingExpected);
           expect(smartLoader['length']).toBe(tick.loadersLength);
-          expect(smartLoader['count']()).toBe(tick.loadersCount);
+          expect(smartLoader.count()).toBe(tick.loadersCount);
         })
 
-        expect.assertions(test.ticks.length * 3 + test.changes);
+        expect.assertions(test.ticks.length * 3);
       });
     }
   );
+
+  describe('polling', () => {
+    const pollingTime = 2;
+    const pollingEnd = 10;
+    const pollingEventStart = 5;
+    const pollingEventTime = 2;
+    const tickOffset = 100;
+
+    it('method 1', () => {
+      signalTesting.runInTestingInjectionContext((component, injector, fixture) => {
+        const smartLoader = new SmartLoader();
+
+        const ticks = [
+          { count: 1, loading: true },
+          { count: 1, loading: true },
+          { count: 1, loading: true },
+          { count: 1, loading: true },
+          { count: 2, loading: true },
+          { count: 1, loading: true },
+          { count: 1, loading: true },
+          { count: 1, loading: true },
+          { count: 1, loading: true },
+          { count: 0, loading: false },
+        ]
+
+        expect(smartLoader.loading()).toBe(false);
+        expect(smartLoader.count()).toBe(0);
+
+        smartLoader.startPolling(injector, pollingTime * tickDuration);
+
+        setTimeout(() => {
+          smartLoader.addLoader(pollingEventTime)
+          //console.log('[Loader]', 'Add')
+        }, pollingEventStart * tickDuration)
+
+        setTimeout(() => {
+          smartLoader.clean();
+        }, pollingEnd * tickDuration)
+
+        expect(smartLoader.loading()).toBe(true);
+        expect(smartLoader.count()).toBe(1);
+
+        ticks.forEach((tick) => {
+          jest.advanceTimersByTime(tickDuration);
+          signalTesting.flushEffects();
+
+          expect(smartLoader.loading()).toBe(tick.loading);
+          expect(smartLoader.count()).toBe(tick.count);
+        })
+
+        expect.assertions((ticks.length * 2) + 4);
+      })
+    })
+
+    it('method 2', () => {
+      signalTesting.runInTestingInjectionContext((component, injector, fixture) => {
+        const ticks = [
+          { count: 1 },
+          { count: 1 },
+          { count: 1 },
+          { count: 1 },
+          { count: 1 },
+          { count: 1 },
+          { count: 1 },
+          { count: 1 },
+          { count: 1 },
+        ];
+        let currentTicks = 1;
+
+        const callback = (): Promise<void> => {
+          return new Promise(resolve => {
+            console.log('[Callback] Begin', currentTicks)
+            setTimeout(() => {
+              console.log('[Callback] End', currentTicks)
+              resolve();
+            }, currentTicks * tickDuration)
+          })
+        }
+
+        const smartPolling = new Poller(
+          injector,
+          pollingTime * tickDuration,
+          callback
+        );
+        smartPolling.start();
+        signalTesting.flushEffects();
+
+        setTimeout(() => {
+          smartPolling.pause();
+        }, pollingEnd * tickDuration)
+
+        ticks.forEach((tick, index) => {
+          console.log('[Tick]', index, tick);
+          currentTicks = tick.count;
+
+          jest.advanceTimersByTime(tickDuration);
+          signalTesting.flushEffects();
+        });
+
+        expect.assertions(0);
+      })
+    })
+  })
 
   afterEach(() => {
     jest.useRealTimers()

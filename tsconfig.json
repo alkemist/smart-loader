@@ -20,6 +20,9 @@
       "ES2022",
       "dom",
       "es2021.weakref"
+    ],
+    "types": [
+
     ]
   },
   "exclude": [
